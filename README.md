@@ -60,6 +60,8 @@ https://downloads.cloudflareclient.com/v1/download/windows/ga
 
 Windows may ask for administrator permission to install WARP.
 
+Cloudflare WARP installs a Windows network service/driver, so it cannot be installed without administrator permission. Some sandbox environments block UAC/admin prompts; in that case the watcher keeps the downloaded MSI and opens its location instead of silently pretending the install succeeded.
+
 ## Build
 
 Requires the .NET 9 SDK.
@@ -220,6 +222,27 @@ https://one.one.one.one/
 ```
 
 Then run `DiscordWarpSetup.exe` again.
+
+The setup writes the MSI installer log here:
+
+```text
+%LOCALAPPDATA%\DiscordWarp\cloudflare-warp-install.log
+```
+
+It also keeps the downloaded installer here:
+
+```text
+%LOCALAPPDATA%\DiscordWarp\Cloudflare_WARP_Release-x64.msi
+```
+
+The setup tries multiple installation methods:
+
+- elevated passive `msiexec`
+- non-elevated `msiexec` fallback
+- interactive MSI launch
+- `winget install --id Cloudflare.Warp` if winget is available
+
+If all methods fail in a sandbox, run the setup on a normal Windows desktop or install WARP manually with administrator permission.
 
 ## Security and False Positives
 

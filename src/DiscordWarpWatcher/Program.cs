@@ -1,8 +1,10 @@
+using System.ComponentModel;
 using System.Diagnostics;
 using System.Management;
 using System.Net;
 using System.Net.Sockets;
 using System.Runtime.InteropServices;
+using System.Security.Principal;
 using System.Text;
 using System.Text.RegularExpressions;
 using Microsoft.Win32;
@@ -25,6 +27,7 @@ internal static class Program
     private const string PatchMarker = "DiscordWarpWatcherPatch";
     private const string WarpDownloadUrl = "https://downloads.cloudflareclient.com/v1/download/windows/ga";
     private const string WarpInstallerName = "Cloudflare_WARP_Release-x64.msi";
+    private const string WarpInstallerLogName = "cloudflare-warp-install.log";
 
     private static readonly string InstallDir = Path.Combine(
         Environment.GetFolderPath(Environment.SpecialFolder.LocalApplicationData),
@@ -674,8 +677,9 @@ internal static class Program
         try
         {
             var installerPath = Path.Combine(InstallDir, WarpInstallerName);
+            var installerLogPath = Path.Combine(InstallDir, WarpInstallerLogName);
             await DownloadWarpInstallerAsync(installerPath);
-            await RunWarpInstallerAsync(installerPath);
+            await RunWarpInstallerAsync(installerPath, installerLogPath);
 
             if (await WaitForWarpCliAsync(TimeSpan.FromMinutes(3)))
             {
@@ -683,7 +687,8 @@ internal static class Program
             }
 
             MessageBox.Show(
-                "WARP setup was started, but warp-cli was not found yet. After the installer finishes, run this setup file once more.",
+                "WARP setup was started, but warp-cli was not found yet. After the installer finishes, run this setup file once more.\n\nInstaller path:\n" +
+                installerPath + "\n\nInstaller log:\n" + installerLogPath,
                 "Discord WARP Watcher",
                 MessageBoxButtons.OK,
                 MessageBoxIcon.Warning);
@@ -692,12 +697,19 @@ internal static class Program
         catch (Exception ex)
         {
             Log("WARP install failed: " + ex);
+            var installerPath = Path.Combine(InstallDir, WarpInstallerName);
+            var installerLogPath = Path.Combine(InstallDir, WarpInstallerLogName);
             MessageBox.Show(
-                "Automatic WARP installation could not be completed. The Cloudflare download page will open; install WARP, then run this setup file again.\n\n" + ex.Message,
+                "Automatic WARP installation could not be completed.\n\n" +
+                "Cloudflare WARP requires Windows administrator permission because it installs a network service. Sandboxes often block this permission prompt.\n\n" +
+                "Downloaded installer:\n" + installerPath + "\n\n" +
+                "Installer log:\n" + installerLogPath + "\n\n" +
+                "After installing WARP manually or approving the administrator prompt, run this setup file again.\n\n" +
+                ex.Message,
                 "Discord WARP Watcher",
                 MessageBoxButtons.OK,
                 MessageBoxIcon.Warning);
-            Process.Start(new ProcessStartInfo("https://one.one.one.one/") { UseShellExecute = true });
+            TryOpenInstallerLocation(installerPath);
             return true;
         }
     }
@@ -717,18 +729,77 @@ internal static class Program
         await using var input = await response.Content.ReadAsStreamAsync();
         await using var output = new FileStream(installerPath, FileMode.Create, FileAccess.Write, FileShare.None);
         await input.CopyToAsync(output);
+
+        var fileInfo = new FileInfo(installerPath);
+        if (!fileInfo.Exists || fileInfo.Length < 1024 * 1024)
+        {
+            throw new InvalidOperationException("The downloaded WARP installer is unexpectedly small.");
+        }
     }
 
-    private static async Task RunWarpInstallerAsync(string installerPath)
+    private static async Task RunWarpInstallerAsync(string installerPath, string installerLogPath)
     {
+        if (!File.Exists(installerPath))
+        {
+            throw new FileNotFoundException("WARP installer was not found.", installerPath);
+        }
+
+        var attempts = new List<(string Name, Func<Task<InstallerResult>> Run)>
+        {
+            ("elevated passive msiexec", () => RunWarpMsiExecAsync(installerPath, installerLogPath, passive: true, elevated: !IsCurrentProcessElevated())),
+            ("current-user passive msiexec", () => RunWarpMsiExecAsync(installerPath, installerLogPath, passive: true, elevated: false)),
+            ("interactive MSI shell launch", () => RunWarpMsiShellAsync(installerPath))
+        };
+
+        if (await IsCommandAvailableAsync("winget.exe"))
+        {
+            attempts.Add(("winget", RunWarpWingetAsync));
+        }
+
+        var failures = new List<string>();
+        foreach (var (name, run) in attempts)
+        {
+            try
+            {
+                Log($"Trying WARP install via {name}.");
+                var result = await run();
+                if (result.ExitCode is 0 or 3010)
+                {
+                    Log($"WARP install attempt succeeded via {name} with exit code {result.ExitCode}.");
+                    return;
+                }
+
+                failures.Add($"{name}: exit code {result.ExitCode} {result.Message}".Trim());
+            }
+            catch (Win32Exception ex) when (ex.NativeErrorCode == 1223)
+            {
+                failures.Add($"{name}: administrator permission was denied or unavailable.");
+            }
+            catch (Exception ex)
+            {
+                failures.Add($"{name}: {ex.Message}");
+            }
+        }
+
+        throw new InvalidOperationException("All WARP install attempts failed. " + string.Join(" | ", failures));
+    }
+
+    private static async Task<InstallerResult> RunWarpMsiExecAsync(string installerPath, string installerLogPath, bool passive, bool elevated)
+    {
+        var mode = passive ? "/passive" : "";
         var psi = new ProcessStartInfo
         {
             FileName = "msiexec.exe",
-            Arguments = $"/i \"{installerPath}\" /passive /norestart",
-            UseShellExecute = true,
-            Verb = "runas",
+            Arguments = $"/i \"{installerPath}\" {mode} /norestart /L*v \"{installerLogPath}\"",
+            UseShellExecute = elevated,
+            Verb = elevated ? "runas" : "",
             WindowStyle = ProcessWindowStyle.Normal
         };
+
+        if (!elevated)
+        {
+            psi.CreateNoWindow = true;
+        }
 
         using var process = Process.Start(psi);
         if (process is null)
@@ -737,10 +808,129 @@ internal static class Program
         }
 
         await process.WaitForExitAsync();
-        if (process.ExitCode is not 0 and not 3010)
+        return new InstallerResult(process.ExitCode, $"Log: {installerLogPath}");
+    }
+
+    private static async Task<InstallerResult> RunWarpMsiShellAsync(string installerPath)
+    {
+        var psi = new ProcessStartInfo
         {
-            throw new InvalidOperationException($"WARP setup exited with code {process.ExitCode}.");
+            FileName = installerPath,
+            UseShellExecute = true,
+            Verb = "open",
+            WindowStyle = ProcessWindowStyle.Normal
+        };
+
+        using var process = Process.Start(psi);
+        if (process is null)
+        {
+            throw new InvalidOperationException("MSI shell launch failed.");
         }
+
+        await process.WaitForExitAsync();
+        return new InstallerResult(process.ExitCode, "Interactive MSI launch.");
+    }
+
+    private static async Task<InstallerResult> RunWarpWingetAsync()
+    {
+        var psi = new ProcessStartInfo
+        {
+            FileName = "winget.exe",
+            UseShellExecute = false,
+            CreateNoWindow = true,
+            RedirectStandardOutput = true,
+            RedirectStandardError = true
+        };
+
+        foreach (var argument in new[]
+                 {
+                     "install",
+                     "--id", "Cloudflare.Warp",
+                     "--exact",
+                     "--silent",
+                     "--accept-package-agreements",
+                     "--accept-source-agreements"
+                 })
+        {
+            psi.ArgumentList.Add(argument);
+        }
+
+        using var process = Process.Start(psi);
+        if (process is null)
+        {
+            throw new InvalidOperationException("winget could not be started.");
+        }
+
+        var outputTask = process.StandardOutput.ReadToEndAsync();
+        var errorTask = process.StandardError.ReadToEndAsync();
+        await process.WaitForExitAsync();
+        var output = await outputTask;
+        var error = await errorTask;
+        Log($"winget WARP install exited {process.ExitCode}: {output} {error}".Trim());
+        return new InstallerResult(process.ExitCode, error);
+    }
+
+    private static bool IsCurrentProcessElevated()
+    {
+        try
+        {
+            using var identity = WindowsIdentity.GetCurrent();
+            var principal = new WindowsPrincipal(identity);
+            return principal.IsInRole(WindowsBuiltInRole.Administrator);
+        }
+        catch
+        {
+            return false;
+        }
+    }
+
+    private static async Task<bool> IsCommandAvailableAsync(string command)
+    {
+        try
+        {
+            var psi = new ProcessStartInfo
+            {
+                FileName = command,
+                Arguments = "--version",
+                UseShellExecute = false,
+                CreateNoWindow = true,
+                RedirectStandardOutput = true,
+                RedirectStandardError = true
+            };
+
+            using var process = Process.Start(psi);
+            if (process is null)
+            {
+                return false;
+            }
+
+            using var cts = new CancellationTokenSource(TimeSpan.FromSeconds(5));
+            await process.WaitForExitAsync(cts.Token);
+            return true;
+        }
+        catch
+        {
+            return false;
+        }
+    }
+
+    private static void TryOpenInstallerLocation(string installerPath)
+    {
+        try
+        {
+            if (File.Exists(installerPath))
+            {
+                Process.Start(new ProcessStartInfo("explorer.exe", $"/select,\"{installerPath}\"") { UseShellExecute = true });
+                return;
+            }
+        }
+        catch { }
+
+        try
+        {
+            Process.Start(new ProcessStartInfo("https://one.one.one.one/") { UseShellExecute = true });
+        }
+        catch { }
     }
 
     private static async Task<bool> WaitForWarpCliAsync(TimeSpan timeout)
@@ -1286,3 +1476,5 @@ internal sealed record DiscordProcess(int ProcessId, bool IsProxied);
 internal sealed record DiscordInstall(string Path, Version Version, DateTime LastWriteUtc);
 
 internal sealed record CommandResult(int ExitCode, string Output, string Error);
+
+internal sealed record InstallerResult(int ExitCode, string Message);
