@@ -1,5 +1,7 @@
 # Discord WARP Watcher
 
+[![VirusTotal](https://img.shields.io/badge/VirusTotal-Scan_Results-blueviolet)](https://www.virustotal.com/gui/file/7f08f9a3f15f19021c9a9fba5a1791735bf023d660a27b69b48a748f5cb4ce42?nocache=1)
+
 [🇹🇷 Türkçe (Turkish)](#türkçe) | [🇬🇧 English](#english)
 
 ---
@@ -7,7 +9,7 @@
 <a name="türkçe"></a>
 ## 🇹🇷 Türkçe
 
-Bilgisayarınızın tüm internet trafiğini WARP üzerinden yönlendirmeden, sadece Discord'u Cloudflare WARP üzerinde tutan küçük bir Windows yardımcı aracıdır.
+**Discord erişim engeli kaldırma** ve **Discord yasak kaldırma** gibi ihtiyaçlar için tasarlanmış; bilgisayarınızın tüm internet trafiğini (oyunlar, tarayıcılar vb.) WARP üzerinden yönlendirmeden **sadece Discord'u** Cloudflare WARP proxy'si üzerinde tutarak kesintisiz ve hızlı erişim sağlayan küçük bir Windows yardımcı aracıdır.
 
 Discord Başlat menüsünden, Windows başlangıcından, Çalıştır penceresinden veya normal masaüstü kısayolundan başlatılabilir. Eğer proxy argümanı olmadan başlatılırsa, izleyici (watcher) ana `Discord.exe` sürecini algılar, kapatır, Cloudflare WARP'ı yerel proxy modunda hazırlar ve Discord'u şu argümanlarla yeniden başlatır:
 
@@ -148,7 +150,7 @@ Komut satırı şunları içermelidir:
 <a name="english"></a>
 ## 🇬🇧 English
 
-A small Windows helper that keeps Discord on Cloudflare WARP without routing the rest of your computer through WARP.
+A small Windows helper designed to **unblock Discord** and bypass restrictions. It keeps Discord running securely on a Cloudflare WARP proxy without routing the rest of your computer's internet traffic (games, browsers, etc.) through the VPN/WARP.
 
 Discord can be launched from the Start menu, Windows startup, Run dialog, or its normal desktop shortcut. If it starts without the proxy argument, the watcher detects the main `Discord.exe` process, closes it, prepares Cloudflare WARP in local proxy mode, and relaunches Discord with:
 
