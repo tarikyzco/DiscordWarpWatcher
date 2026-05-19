@@ -1,6 +1,6 @@
 # Discord WARP Watcher
 
-[![VirusTotal](https://img.shields.io/badge/VirusTotal-Scan_Results-blueviolet)](https://www.virustotal.com/gui/file/7f08f9a3f15f19021c9a9fba5a1791735bf023d660a27b69b48a748f5cb4ce42?nocache=1)
+[![VirusTotal](https://img.shields.io/badge/VirusTotal-Scan_Results-blueviolet)](https://www.virustotal.com/gui/file/549a5b7c635bed433b2a5bbb511fd044f478b20b2bfdced47282536371d6087d?nocache=1)
 
 [🇹🇷 Türkçe (Turkish)](#türkçe) | [🇬🇧 English](#english)
 
@@ -61,7 +61,7 @@ Eğer WARP yüklü değilse, kurulum dosyası resmi Cloudflare Windows yükleyic
 .NET 9 SDK gerektirir.
 
 ```powershell
-dotnet publish .\src\DiscordWarpWatcher\DiscordWarpWatcher.csproj -c Release -r win-x64 --self-contained true -p:PublishSingleFile=true -p:EnableCompressionInSingleFile=true --source https://api.nuget.org/v3/index.json
+dotnet publish .\src\DiscordWarpWatcher\DiscordWarpWatcher.csproj -c Release -r win-x64 --self-contained true -p:PublishSingleFile=true --source https://api.nuget.org/v3/index.json
 ```
 
 Derleme çıktısı:
@@ -206,7 +206,7 @@ If WARP is not installed, the setup tries to download the official Cloudflare Wi
 Requires the .NET 9 SDK.
 
 ```powershell
-dotnet publish .\src\DiscordWarpWatcher\DiscordWarpWatcher.csproj -c Release -r win-x64 --self-contained true -p:PublishSingleFile=true -p:EnableCompressionInSingleFile=true --source https://api.nuget.org/v3/index.json
+dotnet publish .\src\DiscordWarpWatcher\DiscordWarpWatcher.csproj -c Release -r win-x64 --self-contained true -p:PublishSingleFile=true --source https://api.nuget.org/v3/index.json
 ```
 
 Build output:
