@@ -1,207 +1,66 @@
 # Discord WARP Watcher
 
-[![VirusTotal](https://img.shields.io/badge/VirusTotal-Scan_Results-blueviolet)](https://www.virustotal.com/gui/file/549a5b7c635bed433b2a5bbb511fd044f478b20b2bfdced47282536371d6087d?nocache=1)
+A small Windows helper that keeps **only Discord** on Cloudflare WARP while leaving the rest of your internet connection untouched.
 
-[🇹🇷 Türkçe (Turkish)](#türkçe) | [🇬🇧 English](#english)
-
----
-
-<a name="türkçe"></a>
-## 🇹🇷 Türkçe
-
-**Discord erişim engeli kaldırma** ve **Discord yasak kaldırma** gibi ihtiyaçlar için tasarlanmış; bilgisayarınızın tüm internet trafiğini (oyunlar, tarayıcılar vb.) WARP üzerinden yönlendirmeden **sadece Discord'u** Cloudflare WARP proxy'si üzerinde tutarak kesintisiz ve hızlı erişim sağlayan küçük bir Windows yardımcı aracıdır.
-
-Discord Başlat menüsünden, Windows başlangıcından, Çalıştır penceresinden veya normal masaüstü kısayolundan başlatılabilir. Eğer proxy argümanı olmadan başlatılırsa, izleyici (watcher) ana `Discord.exe` sürecini algılar, kapatır, Cloudflare WARP'ı yerel proxy modunda hazırlar ve Discord'u şu argümanlarla yeniden başlatır:
+Discord can be launched from the Start menu, Windows startup, the Run dialog, or the normal Discord shortcut. If Discord starts without the proxy argument, the watcher detects the main `Discord.exe` process, closes it, prepares Cloudflare WARP in local proxy mode, and relaunches Discord through WARP.
 
 ```text
---proxy-server=socks4://127.0.0.1:40000
+--proxy-server=socks4://127.0.0.1:<selected-port>
 --force-webrtc-ip-handling-policy=disable_non_proxied_udp
 ```
 
-WARP sistem genelinde bir tünel olarak değil, `WarpProxy` modunda çalışır. Tarayıcılar, oyunlar, Steam, YouTube ve diğer uygulamalar, `127.0.0.1:40000` adresini açıkça kullanmadıkları sürece normal internet bağlantınızı kullanmaya devam eder.
+The default WARP proxy port is `40000`. If that port is already busy, the watcher automatically tries a free fallback port between `40001` and `40100`.
 
-> Bunu sorumluluk bilinciyle kullanın. Yerel yasalarınızı, Discord ve Cloudflare hizmet şartlarını kontrol edin. Bu projenin Discord veya Cloudflare ile bir bağlantısı yoktur.
+> This project is not affiliated with Discord or Cloudflare. Use it responsibly and check your local laws and the Discord and Cloudflare terms of service.
 
-### Ne Yapar?
-
-- Kendini şuraya kopyalar:
-  - `%LOCALAPPDATA%\DiscordWarp\DiscordWarpWatcher.exe`
-- Kullanıcıya özel bir başlangıç girdisi (startup) ekler:
-  - `HKCU\Software\Microsoft\Windows\CurrentVersion\Run\DiscordWarpWatcher`
-- Discord'un normal başlangıç girdisini korur:
-  - `"Update.exe" --processStart Discord.exe`
-- Cloudflare WARP eksikse, Cloudflare'den resmi Windows yükleyicisini indirir ve başlatır.
-- WARP'ı proxy modu için başlatmaya çalışır:
-  - `warp-cli --accept-tos registration new`
-  - `warp-cli --accept-tos mode proxy`
-  - `warp-cli --accept-tos proxy port 40000`
-  - `warp-cli --accept-tos connect`
-- Proxy olmadan çalışan ana `Discord.exe` sürecini izler ve yerel WARP proxy'si üzerinden yeniden başlatır.
-- Discord'un başlangıç güncelleme kontrolü engellendiğinde şu anki yüklü sürümü başlatabilmesi için küçük bir `app.asar` yaması uygular.
-  - Yedek yolu: `app.asar.discord-warp-backup`
-  - Discord güncellemeleri bu yamayı silebilir; izleyici, Discord kapalıyken yamayı tekrar uygulamaya çalışır.
-
-### Ne Yapmaz?
-
-- Windows sistem proxy ayarlarını değiştirmez.
-- Tüm internet trafiğini WARP üzerinden yönlendirmez.
-- Discord veya Cloudflare dosyalarını yeniden dağıtmaz.
-- Discord token'larını, tarayıcı verilerini, mesajları, şifreleri veya kullanıcı dosyalarını okumaz.
-
-### Gereksinimler
-
-- Windows 10/11 x64
-- Discord
-- Cloudflare WARP
-
-Eğer WARP yüklü değilse, kurulum dosyası resmi Cloudflare Windows yükleyicisini indirip çalıştırmayı dener. Windows bu yükleyici için yönetici izni isteyebilir.
-
-### Derleme (Build)
-
-.NET 9 SDK gerektirir.
-
-```powershell
-dotnet publish .\src\DiscordWarpWatcher\DiscordWarpWatcher.csproj -c Release -r win-x64 --self-contained true -p:PublishSingleFile=true --source https://api.nuget.org/v3/index.json
-```
-
-Derleme çıktısı:
-
-```text
-src\DiscordWarpWatcher\bin\Release\net9.0-windows\win-x64\publish\DiscordWarpWatcher.exe
-```
-
-Yayın (Release) için bu dosyayı `DiscordWarpSetup.exe` olarak paylaşabilirsiniz.
-
-### Kurulum (Install)
-
-`DiscordWarpSetup.exe` dosyasını bir kez çalıştırın.
-
-Kurulumdan sonra Discord'u normal şekilde açın. İzleyici arka planda çalışır ve yalnızca Discord'a WARP proxy argümanını eklemesi gerektiğinde onu yeniden başlatır.
-
-### Kaldırma (Uninstall)
-
-```powershell
-%LOCALAPPDATA%\DiscordWarp\DiscordWarpWatcher.exe --uninstall
-```
-
-Bundan sonra şu klasörü silebilirsiniz:
-
-```text
-%LOCALAPPDATA%\DiscordWarp
-```
-
-Discord'un `app.asar` yedeğini geri yüklemek için Discord'u kapatın ve şunu çalıştırın:
-
-```powershell
-Copy-Item "$env:LOCALAPPDATA\Discord\app-<version>\resources\app.asar.discord-warp-backup" "$env:LOCALAPPDATA\Discord\app-<version>\resources\app.asar" -Force
-```
-
-`<version>` kısmını yüklü olan Discord uygulama klasörüyle değiştirin, örneğin `app-1.0.9237`.
-
-### Doğrulama (Verify)
-
-Normal internet trafiğinin WARP üzerinden gitmediğini kontrol edin:
-
-```powershell
-curl.exe -s https://www.cloudflare.com/cdn-cgi/trace | Select-String '^warp='
-```
-
-Beklenen:
-
-```text
-warp=off
-```
-
-WARP proxy modunun Discord'a ulaşabildiğini kontrol edin:
-
-```powershell
-curl.exe -s --socks4 127.0.0.1:40000 https://discord.com/api/v10/gateway
-```
-
-Beklenen:
-
-```json
-{"url":"wss://gateway.discord.gg"}
-```
-
-Discord'un proxy argümanıyla çalıştığını kontrol edin:
-
-```powershell
-Get-CimInstance Win32_Process -Filter "name = 'Discord.exe'" |
-  Where-Object { $_.CommandLine -notmatch '--type=' } |
-  Select-Object ProcessId, CommandLine
-```
-
-Komut satırı şunları içermelidir:
-
-```text
---proxy-server=socks4://127.0.0.1:40000
-```
-
-### Güvenlik ve VirusTotal (False Positives)
-
-Program imzasız açık kaynaklı bir .NET uygulaması olduğu ve arka planda Discord'u kapatıp açma, başlangıca (Registry) ekleme, internetten Cloudflare WARP indirme gibi işlemler yaptığı için VirusTotal'de birkaç bilinmeyen antivirüs motoru "False Positive" (Yanlış Pozitif) uyarılar verebilir. Büyük antivirüsler (Windows Defender, Kaspersky vb.) dosyayı tamamen temiz bulmaktadır. Kaynak kodları tamamen açıktır, dileyen kodları satır satır inceleyip kendi bilgisayarında baştan derleyebilir.
-
-### Sürüm Notları (Release Notes)
-
-- `.exe` dosyalarını depoya (repository) commit etmeyin.
-- Derlenmiş `DiscordWarpSetup.exe` için GitHub Releases kullanın.
-- Uygulama, Cloudflare WARP'ı resmi Cloudflare adresinden indirir:
-  - `https://downloads.cloudflareclient.com/v1/download/windows/ga`
-
----
-
-<a name="english"></a>
-## 🇬🇧 English
-
-A small Windows helper designed to **unblock Discord** and bypass restrictions. It keeps Discord running securely on a Cloudflare WARP proxy without routing the rest of your computer's internet traffic (games, browsers, etc.) through the VPN/WARP.
-
-Discord can be launched from the Start menu, Windows startup, Run dialog, or its normal desktop shortcut. If it starts without the proxy argument, the watcher detects the main `Discord.exe` process, closes it, prepares Cloudflare WARP in local proxy mode, and relaunches Discord with:
-
-```text
---proxy-server=socks4://127.0.0.1:40000
---force-webrtc-ip-handling-policy=disable_non_proxied_udp
-```
-
-WARP runs in `WarpProxy` mode, not as a system-wide tunnel. Browsers, games, Steam, YouTube, and other apps should keep using the normal internet connection unless they explicitly use `127.0.0.1:40000`.
-
-> Use this responsibly. Check your local laws and the Discord and Cloudflare terms of service. This project is not affiliated with Discord or Cloudflare.
-
-### What It Does
+## What It Does
 
 - Copies itself to:
   - `%LOCALAPPDATA%\DiscordWarp\DiscordWarpWatcher.exe`
 - Adds a per-user startup entry:
   - `HKCU\Software\Microsoft\Windows\CurrentVersion\Run\DiscordWarpWatcher`
-- Keeps Discord's normal startup entry:
-  - `"Update.exe" --processStart Discord.exe`
-- If Cloudflare WARP is missing, downloads and launches the official Windows installer from Cloudflare.
-- Attempts to initialize WARP for proxy mode:
+- Keeps Discord's normal startup entry when it can find `Update.exe`.
+- Downloads and launches the official Cloudflare WARP Windows installer if WARP is missing.
+- Attempts to initialize WARP:
   - `warp-cli --accept-tos registration new`
   - `warp-cli --accept-tos mode proxy`
-  - `warp-cli --accept-tos proxy port 40000`
+  - `warp-cli --accept-tos proxy port <selected-port>`
   - `warp-cli --accept-tos connect`
-- Watches for an unproxied main `Discord.exe` process and relaunches it through the local WARP proxy.
-- Applies a small `app.asar` startup patch so Discord can launch the currently installed version when its startup update check is blocked.
+- Watches for an unproxied main `Discord.exe` process and relaunches Discord through the selected local WARP proxy port.
+- Searches for Discord in multiple locations:
+  - `%LOCALAPPDATA%\Discord`
+  - `%LOCALAPPDATA%\DiscordCanary`
+  - `%LOCALAPPDATA%\DiscordPTB`
+  - `%ProgramFiles%\Discord`
+  - `%ProgramFiles(x86)%\Discord`
+  - Discord registry uninstall/startup entries
+  - currently running Discord processes
+- Applies a small `app.asar` startup patch when possible, so the currently installed Discord version can launch even if the startup update check is blocked.
   - Backup path: `app.asar.discord-warp-backup`
-  - Discord updates may overwrite this patch; the watcher tries to reapply it while Discord is closed.
+  - If Discord is installed under a protected folder such as `C:\Program Files`, Windows may ask for administrator permission for this patch.
 
-### What It Does Not Do
+## What It Does Not Do
 
 - It does not change Windows system proxy settings.
 - It does not route all internet traffic through WARP.
 - It does not redistribute Discord or Cloudflare binaries.
 - It does not read Discord tokens, browser data, messages, passwords, or user files.
 
-### Requirements
+## Requirements
 
 - Windows 10/11 x64
 - Discord
 - Cloudflare WARP
 
-If WARP is not installed, the setup tries to download the official Cloudflare Windows installer and run it. Windows may ask for administrator permission for that installer.
+If WARP is not installed, the setup downloads the official Cloudflare installer from:
 
-### Build
+```text
+https://downloads.cloudflareclient.com/v1/download/windows/ga
+```
+
+Windows may ask for administrator permission to install WARP.
+
+## Build
 
 Requires the .NET 9 SDK.
 
@@ -217,13 +76,13 @@ src\DiscordWarpWatcher\bin\Release\net9.0-windows\win-x64\publish\DiscordWarpWat
 
 For releases, publish that file as `DiscordWarpSetup.exe`.
 
-### Install
+## Install
 
 Run `DiscordWarpSetup.exe` once.
 
 After setup, open Discord normally. The watcher runs in the background and only relaunches Discord when it needs to add the WARP proxy argument.
 
-### Uninstall
+## Uninstall
 
 ```powershell
 %LOCALAPPDATA%\DiscordWarp\DiscordWarpWatcher.exe --uninstall
@@ -243,7 +102,23 @@ Copy-Item "$env:LOCALAPPDATA\Discord\app-<version>\resources\app.asar.discord-wa
 
 Replace `<version>` with the installed Discord app folder, for example `app-1.0.9237`.
 
-### Verify
+## Diagnostics
+
+Generate a local diagnostics file:
+
+```powershell
+%LOCALAPPDATA%\DiscordWarp\DiscordWarpWatcher.exe --diagnose
+```
+
+This writes and opens:
+
+```text
+%LOCALAPPDATA%\DiscordWarp\diagnostics.txt
+```
+
+The diagnostics file includes WARP status, WARP settings, selected proxy port information, Discord paths, startup entries, and running Discord process command lines.
+
+## Verify
 
 Check that normal internet traffic is not going through WARP:
 
@@ -263,7 +138,13 @@ Check that WARP proxy mode can reach Discord:
 curl.exe -s --socks4 127.0.0.1:40000 https://discord.com/api/v10/gateway
 ```
 
-Expected:
+If port `40000` was busy, check the selected fallback port in:
+
+```text
+%LOCALAPPDATA%\DiscordWarp\watcher.log
+```
+
+Expected response:
 
 ```json
 {"url":"wss://gateway.discord.gg"}
@@ -280,16 +161,68 @@ Get-CimInstance Win32_Process -Filter "name = 'Discord.exe'" |
 The command line should include:
 
 ```text
---proxy-server=socks4://127.0.0.1:40000
+--proxy-server=socks4://127.0.0.1:<selected-port>
 ```
 
-### Security and VirusTotal (False Positives)
+## Troubleshooting
 
-Because this is an unsigned, open-source .NET application that performs background tasks such as restarting Discord, adding registry startup entries, and downloading Cloudflare WARP, a few lesser-known antivirus engines on VirusTotal might flag it as a "False Positive". Major antivirus engines (like Windows Defender, Kaspersky, etc.) report it as completely clean. The source code is open for review, and you are welcome to compile it yourself from scratch.
+### Port 40000 is already busy
 
-### Release Notes
+The watcher now detects this case automatically. It first tries `40000`, then falls back to a free port between `40001` and `40100`.
 
-- Do not commit `.exe` files to the repository.
-- Use GitHub Releases for the built `DiscordWarpSetup.exe`.
-- The app downloads Cloudflare WARP from the official Cloudflare endpoint:
-  - `https://downloads.cloudflareclient.com/v1/download/windows/ga`
+Check the selected port:
+
+```powershell
+Get-Content "$env:LOCALAPPDATA\DiscordWarp\watcher.log" -Tail 50
+```
+
+### Discord is installed in a different folder
+
+The watcher searches common per-user, system-wide, registry, and running-process locations. If Discord still cannot be found, run diagnostics:
+
+```powershell
+%LOCALAPPDATA%\DiscordWarp\DiscordWarpWatcher.exe --diagnose
+```
+
+### app.asar patch fails
+
+If Discord is installed under `C:\Program Files`, patching `app.asar` may require administrator permission. The watcher will request elevation when needed. If the prompt is denied, Discord may still fail at the startup update screen.
+
+### Windows Defender or antivirus blocks the app
+
+This app is unsigned and performs behavior that security tools may consider sensitive:
+
+- adds a startup registry entry
+- downloads the official Cloudflare WARP installer
+- closes and relaunches Discord
+- patches Discord's local `app.asar`
+
+If your antivirus quarantines it, restore the file only if you trust the source. You can also build the app yourself from this repository.
+
+### WARP registration or connection fails
+
+Some school, work, or restricted networks may block Cloudflare WARP registration or connection. Check:
+
+```powershell
+warp-cli --version
+warp-cli status
+warp-cli settings
+```
+
+If registration fails, open the Cloudflare WARP app manually once and complete onboarding, then run Discord normally again.
+
+### WARP installation permission was denied
+
+If WARP was not installed because the Windows administrator prompt was denied, install Cloudflare WARP manually from:
+
+```text
+https://one.one.one.one/
+```
+
+Then run `DiscordWarpSetup.exe` again.
+
+## Security and False Positives
+
+The source code is public and reviewable. The release executable is unsigned, so some antivirus vendors may flag it. For maximum trust, clone the repository and build it locally.
+
+Do not commit `.exe` files to the repository. Use GitHub Releases for `DiscordWarpSetup.exe`.
