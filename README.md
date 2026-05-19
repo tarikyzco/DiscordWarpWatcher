@@ -138,6 +138,10 @@ Komut satırı şunları içermelidir:
 --proxy-server=socks4://127.0.0.1:40000
 ```
 
+### Güvenlik ve VirusTotal (False Positives)
+
+Program imzasız açık kaynaklı bir .NET uygulaması olduğu ve arka planda Discord'u kapatıp açma, başlangıca (Registry) ekleme, internetten Cloudflare WARP indirme gibi işlemler yaptığı için VirusTotal'de birkaç bilinmeyen antivirüs motoru "False Positive" (Yanlış Pozitif) uyarılar verebilir. Büyük antivirüsler (Windows Defender, Kaspersky vb.) dosyayı tamamen temiz bulmaktadır. Kaynak kodları tamamen açıktır, dileyen kodları satır satır inceleyip kendi bilgisayarında baştan derleyebilir.
+
 ### Sürüm Notları (Release Notes)
 
 - `.exe` dosyalarını depoya (repository) commit etmeyin.
@@ -278,6 +282,10 @@ The command line should include:
 ```text
 --proxy-server=socks4://127.0.0.1:40000
 ```
+
+### Security and VirusTotal (False Positives)
+
+Because this is an unsigned, open-source .NET application that performs background tasks such as restarting Discord, adding registry startup entries, and downloading Cloudflare WARP, a few lesser-known antivirus engines on VirusTotal might flag it as a "False Positive". Major antivirus engines (like Windows Defender, Kaspersky, etc.) report it as completely clean. The source code is open for review, and you are welcome to compile it yourself from scratch.
 
 ### Release Notes
 
