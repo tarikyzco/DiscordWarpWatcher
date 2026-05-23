@@ -97,16 +97,15 @@ internal static class Program
         var lastWarpCheck = DateTime.MinValue;
         var lastPatchCheck = DateTime.MinValue;
         var lastRestart = DateTime.MinValue;
+        var lastMixedProcessLog = DateTime.MinValue;
+        var lastDiscordProxyHealthCheck = DateTime.MinValue;
+        int? lastReachableDiscordProxyPort = null;
+        var consecutiveDiscordProxyFailures = 0;
+        var observedHealthyProxiedDiscord = false;
 
         while (true)
         {
             var now = DateTime.UtcNow;
-
-            if (now - lastWarpCheck > TimeSpan.FromSeconds(25))
-            {
-                await EnsureWarpProxyAsync();
-                lastWarpCheck = now;
-            }
 
             var mainProcesses = GetDiscordMainProcesses();
             if (mainProcesses.Count == 0 && now - lastPatchCheck > TimeSpan.FromMinutes(1))
@@ -115,10 +114,72 @@ internal static class Program
                 lastPatchCheck = now;
             }
 
-            if (mainProcesses.Any(process => !process.IsProxied) &&
+            var proxyState = await CheckDiscordProxyStateAsync(
+                mainProcesses,
+                lastReachableDiscordProxyPort,
+                lastDiscordProxyHealthCheck,
+                now);
+            lastReachableDiscordProxyPort = proxyState.ReachablePort;
+            lastDiscordProxyHealthCheck = proxyState.CheckedAt;
+
+            if (proxyState.HasReachableProxy && proxyState.ReachablePort is int reachablePort)
+            {
+                CurrentWarpSocksPort = reachablePort;
+                observedHealthyProxiedDiscord = true;
+                consecutiveDiscordProxyFailures = 0;
+            }
+
+            if (now - lastWarpCheck > TimeSpan.FromSeconds(25) && !proxyState.HasReachableProxy)
+            {
+                await EnsureWarpProxyAsync();
+                lastWarpCheck = now;
+
+                mainProcesses = GetDiscordMainProcesses();
+                proxyState = await CheckDiscordProxyStateAsync(
+                    mainProcesses,
+                    cachedReachablePort: null,
+                    lastHealthCheck: DateTime.MinValue,
+                    now);
+                lastReachableDiscordProxyPort = proxyState.ReachablePort;
+                lastDiscordProxyHealthCheck = proxyState.CheckedAt;
+
+                if (proxyState.HasReachableProxy && proxyState.ReachablePort is int refreshedReachablePort)
+                {
+                    CurrentWarpSocksPort = refreshedReachablePort;
+                    observedHealthyProxiedDiscord = true;
+                    consecutiveDiscordProxyFailures = 0;
+                }
+            }
+
+            var hasProxiedDiscord = mainProcesses.Any(process => process.IsProxied);
+            var hasUnproxiedDiscord = mainProcesses.Any(process => !process.IsProxied);
+            string? restartReason = null;
+
+            if (hasUnproxiedDiscord && !hasProxiedDiscord)
+            {
+                restartReason = "Unproxied Discord detected. Restarting through WARP proxy.";
+            }
+            else if (hasProxiedDiscord && !proxyState.HasReachableProxy)
+            {
+                consecutiveDiscordProxyFailures++;
+                if (consecutiveDiscordProxyFailures >= 2)
+                {
+                    restartReason = "Discord WARP proxy stopped responding. Restarting Discord through the active WARP proxy.";
+                }
+            }
+            else if (hasProxiedDiscord && hasUnproxiedDiscord)
+            {
+                if (now - lastMixedProcessLog > TimeSpan.FromMinutes(5))
+                {
+                    Log("Ignoring an extra unproxied Discord process because a proxied Discord process is already healthy.");
+                    lastMixedProcessLog = now;
+                }
+            }
+
+            if (restartReason is not null &&
                 now - lastRestart > TimeSpan.FromSeconds(4))
             {
-                Log("Unproxied Discord detected. Restarting through WARP proxy.");
+                Log(restartReason);
                 if (!await EnsureWarpProxyAsync())
                 {
                     Log("WARP proxy is not ready. Leaving the current Discord process untouched.");
@@ -129,8 +190,9 @@ internal static class Program
                 KillDiscord();
                 await Task.Delay(700);
                 PatchLatestDiscordAsar();
-                LaunchDiscordWithProxy();
+                LaunchDiscordWithProxy(startMinimized: observedHealthyProxiedDiscord);
                 lastRestart = now;
+                consecutiveDiscordProxyFailures = 0;
             }
 
             await Task.Delay(1000);
@@ -441,9 +503,11 @@ internal static class Program
                     continue;
                 }
 
+                var proxyPort = GetManagedDiscordProxyPort(commandLine);
                 result.Add(new DiscordProcess(
                     pid,
-                    IsDiscordProxied(commandLine)));
+                    proxyPort is not null,
+                    proxyPort));
             }
         }
         catch (Exception ex)
@@ -454,13 +518,74 @@ internal static class Program
         return result;
     }
 
-    private static bool IsDiscordProxied(string commandLine)
+    private static async Task<DiscordProxyState> CheckDiscordProxyStateAsync(
+        IReadOnlyList<DiscordProcess> mainProcesses,
+        int? cachedReachablePort,
+        DateTime lastHealthCheck,
+        DateTime now)
     {
-        return commandLine.Contains($"--proxy-server={ProxyScheme}://127.0.0.1:{CurrentWarpSocksPort}", StringComparison.OrdinalIgnoreCase) ||
-               commandLine.Contains($"--proxy-server={ProxyScheme}://localhost:{CurrentWarpSocksPort}", StringComparison.OrdinalIgnoreCase);
+        var managedPorts = mainProcesses
+            .Where(process => process.ProxyPort is not null)
+            .Select(process => process.ProxyPort!.Value)
+            .Distinct()
+            .ToArray();
+
+        if (cachedReachablePort is not null && !managedPorts.Contains(cachedReachablePort.Value))
+        {
+            cachedReachablePort = null;
+        }
+
+        if (managedPorts.Length > 0 &&
+            (cachedReachablePort is null || now - lastHealthCheck > TimeSpan.FromSeconds(25)))
+        {
+            cachedReachablePort = await FindReachableProxyPortAsync(managedPorts);
+            lastHealthCheck = now;
+        }
+
+        var hasReachableProxy = cachedReachablePort is not null &&
+            managedPorts.Contains(cachedReachablePort.Value);
+
+        return new DiscordProxyState(managedPorts, cachedReachablePort, lastHealthCheck, hasReachableProxy);
     }
 
-    private static void LaunchDiscordWithProxy()
+    private static async Task<int?> FindReachableProxyPortAsync(IEnumerable<int> ports)
+    {
+        foreach (var port in ports)
+        {
+            if (await IsSocks4ProxyReachableAsync(port, TimeSpan.FromMilliseconds(900)))
+            {
+                return port;
+            }
+        }
+
+        return null;
+    }
+
+    private static int? GetManagedDiscordProxyPort(string commandLine)
+    {
+        var match = Regex.Match(
+            commandLine,
+            @"(?:^|\s)--proxy-server=(?<scheme>[a-z0-9+.-]+)://(?<host>127\.0\.0\.1|localhost):(?<port>\d+)",
+            RegexOptions.IgnoreCase);
+
+        if (!match.Success ||
+            !match.Groups["scheme"].Value.Equals(ProxyScheme, StringComparison.OrdinalIgnoreCase) ||
+            !int.TryParse(match.Groups["port"].Value, out var port) ||
+            !IsManagedProxyPort(port))
+        {
+            return null;
+        }
+
+        return port;
+    }
+
+    private static bool IsManagedProxyPort(int port)
+    {
+        return port == PreferredWarpSocksPort ||
+            port is >= FallbackWarpSocksPortStart and <= FallbackWarpSocksPortEnd;
+    }
+
+    private static void LaunchDiscordWithProxy(bool startMinimized)
     {
         var discordExe = FindDiscordExe();
         if (discordExe is null)
@@ -469,11 +594,18 @@ internal static class Program
             return;
         }
 
+        var arguments = $"--proxy-server={ProxyScheme}://127.0.0.1:{CurrentWarpSocksPort} --force-webrtc-ip-handling-policy=disable_non_proxied_udp";
+        if (startMinimized)
+        {
+            arguments += " --start-minimized";
+        }
+
         Process.Start(new ProcessStartInfo
         {
             FileName = discordExe,
             WorkingDirectory = Path.GetDirectoryName(discordExe) ?? "",
-            Arguments = $"--proxy-server={ProxyScheme}://127.0.0.1:{CurrentWarpSocksPort} --force-webrtc-ip-handling-policy=disable_non_proxied_udp",
+            Arguments = arguments,
+            WindowStyle = startMinimized ? ProcessWindowStyle.Minimized : ProcessWindowStyle.Normal,
             UseShellExecute = true
         });
     }
@@ -1471,7 +1603,13 @@ internal static class Program
     }
 }
 
-internal sealed record DiscordProcess(int ProcessId, bool IsProxied);
+internal sealed record DiscordProcess(int ProcessId, bool IsProxied, int? ProxyPort);
+
+internal sealed record DiscordProxyState(
+    IReadOnlyList<int> ManagedPorts,
+    int? ReachablePort,
+    DateTime CheckedAt,
+    bool HasReachableProxy);
 
 internal sealed record DiscordInstall(string Path, Version Version, DateTime LastWriteUtc);
 

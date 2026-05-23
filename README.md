@@ -178,6 +178,16 @@ Check the selected port:
 Get-Content "$env:LOCALAPPDATA\DiscordWarp\watcher.log" -Tail 50
 ```
 
+### Discord randomly pops to the foreground
+
+Older builds could relaunch Discord too aggressively when WARP changed between the preferred port and a fallback port. Current builds treat any managed WARP proxy port between `40000` and `40100` as valid, avoid killing Discord when a healthy proxied Discord process is already running, and start automatic recovery relaunches minimized.
+
+Update to the latest build if your log repeatedly shows:
+
+```text
+Unproxied Discord detected. Restarting through WARP proxy.
+```
+
 ### Discord is installed in a different folder
 
 The watcher searches common per-user, system-wide, registry, and running-process locations. If Discord still cannot be found, run diagnostics:
